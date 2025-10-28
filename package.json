@@ -1,0 +1,16 @@
+{
+  "name": "webscraper-gsmpartscenter",
+  "version": "1.0.0",
+  "description": "Daily web scraper for gsmpartscenter.com, Dockerized for MEAN integration.",
+  "main": "backend/services/scraperService.js",
+  "scripts": {
+    "start": "node backend/services/scraperService.js"
+  },
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "mongoose": "^8.0.0",
+    "puppeteer": "^24.15.0",
+    "dotenv": "^16.4.5"
+  }
+}
