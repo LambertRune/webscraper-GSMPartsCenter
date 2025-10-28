@@ -3,176 +3,216 @@ require('dotenv').config();
 const mongoose = require('mongoose');
 const puppeteer = require('puppeteer');
 const PartData = require('../models/PartData');
+const Brand = require('../models/Brand');
+const ModelCategory = require('../models/ModelCategory');
+const Model = require('../models/Model');
 
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/gsmpartscenter';
 
+/**
+ * Scrapes all brands, models, categories, and parts from the site.
+ */
 async function scrapeBrandsAndModels() {
   // Helper: random delay between min and max ms
   function randomDelay(min = 1000, max = 3000) {
     return new Promise(res => setTimeout(res, Math.floor(Math.random() * (max - min + 1)) + min));
   }
-  await mongoose.connect(MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true });
-  const browser = await puppeteer.launch({ args: ['--no-sandbox', '--disable-setuid-sandbox'] });
-  const page = await browser.newPage();
-  // Set a realistic user agent and viewport
-  await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-  await page.setViewport({ width: 1280, height: 800 });
-  await page.goto('https://www.gsmpartscenter.com/', { waitUntil: 'networkidle2' });
-  // Wait for the navigation menu to appear (up to 15s)
+
+  let browser;
   try {
-    await page.waitForSelector('ul.groupmenu.by-parts', { timeout: 15000 });
-  } catch (e) {
-    console.log('Navigation menu not found after waiting. Printing full page HTML for debugging:');
-    const fullHtml = await page.content();
-    require('fs').writeFileSync('debug-homepage.html', fullHtml);
-    console.log('Full homepage HTML written to debug-homepage.html');
-  }
-  // Print the HTML of the navigation menu (if found)
-  const navHtml = await page.evaluate(() => {
-    const nav = document.querySelector('ul.groupmenu.by-parts');
-    return nav ? nav.outerHTML : 'Navigation menu not found';
-  });
-  console.log('--- NAVIGATION HTML ---');
-  console.log(navHtml);
+    // 1. --- Connect & Launch ---
+    await mongoose.connect(MONGO_URI);
+    console.log('MongoDB connected.');
 
-  // Step 1: Scrape brands from homepage navigation
-  const brands = await page.evaluate(() => {
-    const brandNodes = Array.from(document.querySelectorAll('ul.groupmenu.by-parts > li[class*="category-node-"]'));
-    return brandNodes.map(li => {
-      const a = li.querySelector('a');
-      const span = a ? a.querySelector('span') : null;
-      if (a && span) {
-        return {
-          name: span.textContent.trim(),
-          url: a.href
-        };
-      }
-      return null;
-    }).filter(Boolean);
-  });
+    browser = await puppeteer.launch({
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+    const page = await browser.newPage();
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+    await page.setViewport({ width: 1280, height: 800 });
 
-  // DEBUG: Print the brands array
-  console.log('--- BRANDS FOUND ---');
-  console.log(JSON.stringify(brands, null, 2));
+    // 2. --- Navigate to Homepage ---
+    await page.goto('https://www.gsmpartscenter.com/', { waitUntil: 'networkidle2' });
+    console.log('Homepage loaded.');
 
-  const results = [];
-
-  // Step 2: For each brand, scrape categories, then models
-  for (const brand of brands) {
     try {
-      await randomDelay();
-      await page.goto(brand.url, { waitUntil: 'networkidle2' });
-      // Scrape categories (e.g., iPhone, iPad, etc. under Apple)
-      const categories = await page.evaluate(() => {
-        // Try to find category links in the left menu or main content
-        const catLinks = Array.from(document.querySelectorAll('.category-list a, .categories-list a, .category-menu a'));
-        return catLinks.map(link => ({
-          name: link.textContent.trim(),
-          url: link.href
-        })).filter(cat => cat.name && cat.url);
-      });
-      if (categories.length === 0) {
-        // If no categories, treat brand page as a category itself
-        categories.push({ name: brand.name, url: brand.url });
-      }
-      for (const category of categories) {
-        try {
-          await randomDelay();
-          await page.goto(category.url, { waitUntil: 'networkidle2' });
-          // Scrape models (e.g., iPhone 17 Pro Max, etc.)
-          const models = await page.evaluate(() => {
-            // Try to find model links or product items
-            const modelLinks = Array.from(document.querySelectorAll('.category-list a, .categories-list a, .category-menu a'));
-            if (modelLinks.length > 0) {
-              return modelLinks.map(link => ({
-                name: link.textContent.trim(),
-                url: link.href
-              })).filter(m => m.name && m.url);
-            }
-            // Fallback: try product grid/list
-            const items = Array.from(document.querySelectorAll('.category-products .item, .category-products .product-item, .category-products .product'));
-            return items.map(el => {
-              const name = el.querySelector('.product-name, .name, h2, h3')?.textContent?.trim() || '';
-              const countText = el.querySelector('.count, .product-count, .qty, .amount')?.textContent || '';
-              const count = parseInt(countText.replace(/\D/g, ''), 10) || 0;
-              return { name, partCount: count };
-            }).filter(m => m.name);
+      await page.waitForSelector('ul.groupmenu.by-parts', { timeout: 15000 });
+      console.log('Navigation menu found.');
+    } catch (e) {
+      console.error('Navigation menu not found after 15s. Saving debug HTML...');
+      const fullHtml = await page.content();
+      require('fs').writeFileSync('debug-homepage.html', fullHtml);
+      console.error('Debug HTML saved to debug-homepage.html. Aborting.');
+      throw new Error('Navigation menu not found.');
+    }
+
+    // 3. --- Scrape Nav Menu (Once) ---
+    const brands = await page.evaluate(() => {
+      const nav = document.querySelector('ul.groupmenu.by-parts');
+      if (!nav) return [];
+      const brandsData = [];
+      nav.querySelectorAll('li.level0').forEach(brandEl => {
+        const brandA = brandEl.querySelector('a.menu-link');
+        const brandName = brandA?.querySelector('span:last-child')?.textContent.trim() || '';
+        const brandUrl = brandA?.href || '';
+        const categoriesData = [];
+        brandEl.querySelectorAll('ul.level1 > li.level1').forEach(catEl => {
+          const catA = catEl.querySelector('a.menu-link');
+          const catName = catA?.querySelector('span')?.textContent.trim() || '';
+          const catUrl = catA?.href || '';
+          const modelsData = [];
+          catEl.querySelectorAll('div.level2').forEach(modelEl => {
+            const modelA = modelEl.querySelector('a.groupdrop-title');
+            const modelName = modelA?.querySelector('span')?.textContent.trim() || '';
+            const modelUrl = modelA?.href || '';
+            if (modelName && modelUrl) modelsData.push({ name: modelName, url: modelUrl });
           });
-          if (models.length === 0) {
-            // If no models, treat category as a model
-            results.push({
-              brand: brand.name,
-              category: category.name,
-              model: category.name,
-              partCount: 0,
-              scrapedAt: new Date()
-            });
-          } else {
-            for (const model of models) {
-              // If model has a URL, try to get part count from its page
-              let partCount = model.partCount || 0;
-              if (model.url) {
-                try {
-                  await randomDelay();
-                  await page.goto(model.url, { waitUntil: 'networkidle2' });
-                  // Try to get part count from the model page
-                  partCount = await page.evaluate(() => {
-                    // Look for a count element or count products
-                    const countEl = document.querySelector('.count, .product-count, .qty, .amount');
-                    if (countEl) {
-                      const txt = countEl.textContent;
-                      const num = parseInt(txt.replace(/\D/g, ''), 10);
-                      if (!isNaN(num)) return num;
-                    }
-                    // Fallback: count product items
-                    const prods = document.querySelectorAll('.category-products .item, .category-products .product-item, .category-products .product');
-                    return prods.length;
-                  });
-                } catch (e) {
-                  // Ignore errors, use fallback partCount
+          if (catName && catUrl && modelsData.length > 0) {
+            categoriesData.push({ name: catName, url: catUrl, models: modelsData });
+          }
+        });
+        if (brandName && brandUrl && categoriesData.length > 0) {
+          brandsData.push({ name: brandName, url: brandUrl, categories: categoriesData });
+        }
+      });
+      return brandsData;
+    });
+
+    if (brands.length === 0) {
+      throw new Error('No brands found in navigation. Check selectors.');
+    }
+    console.log(`Found ${brands.length} brands in navigation.`);
+
+    // 4. --- Save Nav Data ---
+    const brandDocs = brands.map(b => ({ name: b.name, url: b.url }));
+    const categoryDocs = brands.flatMap(b =>
+      b.categories.map(c => ({
+        name: c.name,
+        url: c.url,
+        brand: b.name
+      }))
+    );
+      let modelDocs = brands.flatMap(b =>
+        b.categories.flatMap(c =>
+          c.models.map(m => ({
+            name: m.name,
+            url: m.url,
+            brand: b.name,
+            modelCategory: c.name
+          }))
+        )
+      );
+      // Filter out models with missing or empty brand, and log them
+      const invalidModels = modelDocs.filter(m => !m.brand || m.brand.trim() === '');
+      if (invalidModels.length > 0) {
+        console.warn('Skipping models with missing brand:', invalidModels);
+      }
+      modelDocs = modelDocs.filter(m => m.brand && m.brand.trim() !== '');
+
+    console.log('Clearing old navigation data...');
+    await Brand.deleteMany({});
+    await ModelCategory.deleteMany({});
+    await Model.deleteMany({});
+
+    console.log('Inserting new navigation data...');
+    if (brandDocs.length > 0) await Brand.insertMany(brandDocs);
+    if (categoryDocs.length > 0) await ModelCategory.insertMany(categoryDocs);
+    if (modelDocs.length > 0) await Model.insertMany(modelDocs);
+    console.log('Navigation data saved.');
+
+    // 5. --- Iterate and Scrape Parts ---
+    const allPartsResults = [];
+    console.log('Starting part scraping for all models...');
+
+    for (const brand of brands) {
+      for (const category of brand.categories) {
+        for (const model of category.models) {
+          try {
+            await randomDelay();
+            console.log(`Scraping model: ${brand.name} > ${category.name} > ${model.name}`);
+            await page.goto(model.url, { waitUntil: 'networkidle2' });
+
+            const parts = await page.evaluate(() => {
+              return Array.from(document.querySelectorAll('.product-item-info')).map(function(part) {
+                let name = '';
+                let type = '';
+                let inStock = false;
+
+                const nameEl = part.querySelector('.product-item-link, .name, h2, h3');
+                const typeEl = part.querySelector('.type, .product-type'); // May not exist
+                const stockEl = part.querySelector('.stock, .availability, .in-stock, .stock-status');
+
+                if (nameEl) name = nameEl.textContent.trim();
+                if (typeEl) type = typeEl.textContent.trim();
+
+                if (stockEl) {
+                  const stockText = stockEl.textContent.toLowerCase();
+                  inStock = stockText.includes('in stock') || stockText.includes('op voorraad') || stockText.includes('available');
+                } else {
+                  // Fallback
+                  const partHtml = part.innerHTML.toLowerCase();
+                  inStock = partHtml.includes('in stock') || partHtml.includes('op voorraad');
                 }
-              }
-              results.push({
+                return { name, type, inStock };
+              });
+            });
+
+            // Add context to the scraped parts
+            for (const part of parts) {
+              allPartsResults.push({
                 brand: brand.name,
-                category: category.name,
+                modelCategory: category.name,
                 model: model.name,
-                partCount,
+                name: part.name,
+                type: part.type,
+                inStock: part.inStock,
                 scrapedAt: new Date()
               });
             }
+            console.log(`Found ${parts.length} parts for ${model.name}.`);
+
+          } catch (err) {
+            console.error(`Error scraping model ${model.name} (${model.url}):`, err.message);
           }
-        } catch (err) {
-          console.error(`Error scraping category ${category.name} for brand ${brand.name}:`, err.message);
         }
       }
-    } catch (err) {
-      console.error(`Error scraping brand ${brand.name}:`, err.message);
     }
+
+    // 6. --- Save Parts Data ---
+    console.log(`Total parts scraped: ${allPartsResults.length}`);
+
+    const validResults = allPartsResults
+      .filter(r => r.brand && r.modelCategory && r.model && r.name) // Filter for essential fields
+      .map(r => ({
+        brand: r.brand,
+        modelCategory: r.modelCategory,
+        model: r.model,
+        name: r.name,
+        type: r.type || '', // Default to empty string if type wasn't found
+        inStock: r.inStock,
+        scrapedAt: r.scrapedAt
+      }));
+
+    console.log(`Valid parts to insert: ${validResults.length}`);
+    await PartData.deleteMany({});
+    if (validResults.length > 0) {
+      await PartData.insertMany(validResults);
+      console.log('Successfully inserted new part data.');
+    } else {
+      console.warn('No valid part results to insert.');
+    }
+
+  } catch (err) {
+    console.error('An unexpected error occurred during scraping:', err);
+  } finally {
+    // 7. --- Cleanup ---
+    if (browser) {
+      await browser.close();
+      console.log('Browser closed.');
+    }
+    await mongoose.disconnect();
+    console.log('MongoDB disconnected.');
   }
-
-  // Print results for verification
-  console.log(JSON.stringify(results, null, 2));
-
-  // Only keep valid entries and map to schema fields
-  const validResults = results
-    .filter(r => r.brand && r.category && r.model)
-    .map(r => ({
-      brand: r.brand,
-      modelCategory: r.category + ' / ' + r.model, // combine for uniqueness
-      partCount: r.partCount,
-      scrapedAt: r.scrapedAt
-    }));
-
-  // Clear old data and insert new
-  await PartData.deleteMany({});
-  if (validResults.length > 0) {
-    await PartData.insertMany(validResults);
-  } else {
-    console.warn('No valid results to insert.');
-  }
-
-  await browser.close();
-  await mongoose.disconnect();
 }
 
 module.exports = { scrapeBrandsAndModels };
@@ -180,7 +220,7 @@ module.exports = { scrapeBrandsAndModels };
 // If run directly, execute the scraper
 if (require.main === module) {
   scrapeBrandsAndModels().catch(err => {
-    console.error('Scraper failed:', err);
+    console.error('Scraper failed to run:', err);
     process.exit(1);
   });
 }
