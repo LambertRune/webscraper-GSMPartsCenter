@@ -18,6 +18,11 @@ async function scrapeBrandsAndModels() {
     return new Promise(res => setTimeout(res, Math.floor(Math.random() * (max - min + 1)) + min));
   }
 
+  const fs = require('fs');
+  const path = require('path');
+  const mainFilePath = path.join(__dirname, '../../parts.ndjson');
+  // Clear the main file at the start
+  fs.writeFileSync(mainFilePath, '');
   let browser;
   try {
     // 1. --- Connect & Launch ---
@@ -157,9 +162,9 @@ async function scrapeBrandsAndModels() {
               });
             });
 
-            // Add context to the scraped parts
+            // Add context to the scraped parts and write to file
             for (const part of parts) {
-              allPartsResults.push({
+              const partObj = {
                 brand: brand.name,
                 modelCategory: category.name,
                 model: model.name,
@@ -167,7 +172,10 @@ async function scrapeBrandsAndModels() {
                 type: part.type,
                 inStock: part.inStock,
                 scrapedAt: new Date()
-              });
+              };
+              allPartsResults.push(partObj);
+              // Write each part as a line to the main file
+              fs.appendFileSync(mainFilePath, JSON.stringify(partObj) + '\n');
             }
             console.log(`Found ${parts.length} parts for ${model.name}.`);
 
@@ -181,25 +189,34 @@ async function scrapeBrandsAndModels() {
     // 6. --- Save Parts Data ---
     console.log(`Total parts scraped: ${allPartsResults.length}`);
 
-    const validResults = allPartsResults
-      .filter(r => r.brand && r.modelCategory && r.model && r.name) // Filter for essential fields
-      .map(r => ({
-        brand: r.brand,
-        modelCategory: r.modelCategory,
-        model: r.model,
-        name: r.name,
-        type: r.type || '', // Default to empty string if type wasn't found
-        inStock: r.inStock,
-        scrapedAt: r.scrapedAt
-      }));
+    // Read all scraped parts from the main file
+    const scrapedLines = fs.readFileSync(mainFilePath, 'utf-8').split('\n').filter(Boolean);
+    const scrapedParts = scrapedLines.map(line => JSON.parse(line));
 
-    console.log(`Valid parts to insert: ${validResults.length}`);
-    await PartData.deleteMany({});
-    if (validResults.length > 0) {
-      await PartData.insertMany(validResults);
-      console.log('Successfully inserted new part data.');
+    // Prepare unique key for each part
+    function partKey(part) {
+      return [part.brand, part.modelCategory, part.model, part.name, part.type && part.type.trim() !== '' ? part.type : 'Unknown'].join('||');
+    }
+
+    // Fetch all existing parts from the database
+    const existingParts = await PartData.find({}, { _id: 0, brand: 1, modelCategory: 1, model: 1, name: 1, type: 1, inStock: 1, scrapedAt: 1 });
+    const existingMap = new Map(existingParts.map(p => [partKey(p), p]));
+
+    // Only insert new or changed parts
+    const toInsert = scrapedParts.filter(part => {
+      const key = partKey(part);
+      const existing = existingMap.get(key);
+      if (!existing) return true; // New part
+      // Compare fields (ignore scrapedAt)
+      return existing.inStock !== part.inStock || existing.name !== part.name;
+    });
+
+    console.log(`Valid parts to insert: ${toInsert.length}`);
+    if (toInsert.length > 0) {
+      await PartData.insertMany(toInsert);
+      console.log('Successfully inserted new/changed part data.');
     } else {
-      console.warn('No valid part results to insert.');
+      console.warn('No new or changed part data to insert.');
     }
 
   } catch (err) {
