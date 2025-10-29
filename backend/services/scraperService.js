@@ -1,3 +1,7 @@
+const Brand = require('../models/Brand');
+const ModelCategory = require('../models/ModelCategory');
+const Model = require('../models/Model');
+const PartData = require('../models/PartData');
 const puppeteer = require('puppeteer');
 require('dotenv').config();
 const mongoose = require('mongoose');
