@@ -1,4 +1,6 @@
+require('dotenv').config();
 const mongoose = require('mongoose');
+const MONGO_URI = process.env.MONGO_URI
 /**
  * Scrapes all brands, models, categories, and parts from the site.
  */
