@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 /**
  * Scrapes all brands, models, categories, and parts from the site.
  */
