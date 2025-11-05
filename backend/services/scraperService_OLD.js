@@ -1,10 +1,9 @@
 const puppeteer = require('puppeteer');
-const fs = require('fs');
-const path = require('path');
-
+require('dotenv').config();
+// NOTE: Database persistence removed. This service now stores parts in NDJSON files
+// and computes diffs between runs. No mongoose or DB connection is used.
 /**
  * Scrapes all brands, models, categories, and parts from the site.
- * Saves data to JSON files for fast API access.
  */
 async function scrapeBrandsAndModels() {
   // Helper: random delay between min and max ms
@@ -12,23 +11,22 @@ async function scrapeBrandsAndModels() {
     return new Promise(res => setTimeout(res, Math.floor(Math.random() * (max - min + 1)) + min));
   }
 
-  // Data file paths
-  const dataDir = path.join(__dirname, '../../data');
-  const brandsFile = path.join(dataDir, 'brands.json');
-  const categoriesFile = path.join(dataDir, 'categories.json');
-  const modelsFile = path.join(dataDir, 'models.json');
-  const partsFile = path.join(dataDir, 'parts.json');
+  const fs = require('fs');
+  const path = require('path');
+  const mainFilePath = path.join(__dirname, '../../parts.ndjson');
+  const prevFilePath = path.join(__dirname, '../../parts.previous.ndjson');
+  const changesFilePath = path.join(__dirname, '../../changes.json');
 
-  // Ensure data directory exists
-  if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
+  // If there's an existing main file, back it up as previous before starting
+  if (fs.existsSync(mainFilePath)) {
+    try { fs.copyFileSync(mainFilePath, prevFilePath); } catch (e) { /* ignore */ }
   }
-
+  // Start with an empty new main file
+  fs.writeFileSync(mainFilePath, '');
   let browser;
   try {
-    console.log('Starting scraper...');
+    // 1. --- Launch browser ---
 
-    // Launch browser
     browser = await puppeteer.launch({
       args: ['--no-sandbox', '--disable-setuid-sandbox']
     });
@@ -36,24 +34,24 @@ async function scrapeBrandsAndModels() {
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
     await page.setViewport({ width: 1280, height: 800 });
 
-    // Navigate to homepage
+    // 2. --- Navigate to Homepage ---
     await page.goto('https://www.gsmpartscenter.com/', { waitUntil: 'networkidle2' });
     console.log('Homepage loaded.');
 
-    // Wait for navigation menu
     try {
       await page.waitForSelector('ul.groupmenu.by-parts', { timeout: 15000 });
       console.log('Navigation menu found.');
     } catch (e) {
       console.error('Navigation menu not found after 15s. Saving debug HTML...');
       const fullHtml = await page.content();
-      fs.writeFileSync('debug-homepage.html', fullHtml);
+      require('fs').writeFileSync('debug-homepage.html', fullHtml);
       console.error('Debug HTML saved to debug-homepage.html. Aborting.');
       throw new Error('Navigation menu not found.');
     }
 
-    // Scrape navigation structure
+    // 3. --- Scrape Nav Menu (Once) ---
     const brands = await page.evaluate(() => {
+      // ... (your navigation scraping logic is correct, no changes needed) ...
       const nav = document.querySelector('ul.groupmenu.by-parts');
       if (!nav) return [];
       const brandsData = [];
@@ -89,7 +87,7 @@ async function scrapeBrandsAndModels() {
     }
     console.log(`Found ${brands.length} brands in navigation.`);
 
-    // Prepare navigation data
+    // 4. --- Save Nav Data to JSON files (DB removed) ---
     const brandDocs = brands.map(b => ({ name: b.name, url: b.url }));
     const categoryDocs = brands.flatMap(b =>
       b.categories.map(c => ({
@@ -98,7 +96,7 @@ async function scrapeBrandsAndModels() {
         brand: b.name
       }))
     );
-    let modelDocs = brands.flatMap(b =>
+    const modelDocs = brands.flatMap(b =>
       b.categories.flatMap(c =>
         c.models.map(m => ({
           name: m.name,
@@ -109,22 +107,18 @@ async function scrapeBrandsAndModels() {
       )
     );
 
-    // Filter out invalid models
-    const invalidModels = modelDocs.filter(m => !m.brand || m.brand.trim() === '');
-    if (invalidModels.length > 0) {
-      console.warn('Skipping models with missing brand:', invalidModels);
+    try {
+      fs.writeFileSync(path.join(__dirname, '../../brands.json'), JSON.stringify(brandDocs, null, 2));
+      fs.writeFileSync(path.join(__dirname, '../../categories.json'), JSON.stringify(categoryDocs, null, 2));
+      fs.writeFileSync(path.join(__dirname, '../../models.json'), JSON.stringify(modelDocs, null, 2));
+      console.log('Navigation data written to JSON files.');
+    } catch (e) {
+      console.warn('Failed to write navigation JSON files:', e.message);
     }
-    modelDocs = modelDocs.filter(m => m.brand && m.brand.trim() !== '');
 
-    // Save navigation data to JSON files
-    console.log('Saving navigation data...');
-    fs.writeFileSync(brandsFile, JSON.stringify(brandDocs, null, 2));
-    fs.writeFileSync(categoriesFile, JSON.stringify(categoryDocs, null, 2));
-    fs.writeFileSync(modelsFile, JSON.stringify(modelDocs, null, 2));
-    console.log('Navigation data saved.');
 
-    // Scrape parts from all models
-    const allParts = [];
+    // 5. --- Iterate and Scrape Parts ---
+    const allPartsResults = [];
     console.log('Starting part scraping for all models...');
 
     for (const brand of brands) {
@@ -136,19 +130,21 @@ async function scrapeBrandsAndModels() {
             await page.goto(model.url, { waitUntil: 'networkidle2' });
 
             const parts = await page.evaluate(() => {
+              // ... (your page evaluation logic is correct, no changes) ...
               const realProducts = Array.from(
                 document.querySelectorAll('.products.wrapper.grid.products-grid ol.product-items > li.product-item .product-item-info')
               );
               return realProducts.map(function(part) {
                 let name = '';
+                let type = ''; // This type is often empty, we will overwrite it
                 let inStock = false;
-                let imageUrl = '';
 
                 const nameEl = part.querySelector('.product-item-link, .name, h2, h3');
+                const typeEl = part.querySelector('.type, .product-type'); // May not exist
                 const stockEl = part.querySelector('.stock, .availability, .in-stock, .stock-status');
-                const imageEl = part.querySelector('img.product-image-photo, .product-item-photo img, img');
 
                 if (nameEl) name = nameEl.textContent.trim();
+                if (typeEl) type = typeEl.textContent.trim(); // We'll ignore this one
 
                 if (stockEl) {
                   const stockText = stockEl.textContent.toLowerCase();
@@ -157,18 +153,31 @@ async function scrapeBrandsAndModels() {
                   const partHtml = part.innerHTML.toLowerCase();
                   inStock = partHtml.includes('in stock') || partHtml.includes('op voorraad');
                 }
-
-                if (imageEl) {
-                  imageUrl = imageEl.src || imageEl.getAttribute('data-src') || '';
+                // Attempt to extract a location/warehouse field from the item
+                let location = '';
+                // look for common selectors
+                const locationSelectors = ['.location', '.stock-location', '.product-location', '.warehouse', '.availability .location'];
+                for (const sel of locationSelectors) {
+                  const el = part.querySelector(sel);
+                  if (el && el.textContent && el.textContent.trim()) {
+                    location = el.textContent.trim();
+                    break;
+                  }
                 }
-
-                return { name, inStock, imageUrl };
+                if (!location) {
+                  // fallback: search for "location:" or "loc:" inside the HTML/text
+                  const txt = part.innerText || part.textContent || '';
+                  const locMatch = txt.match(/location[:\s]*([A-Za-z0-9\-\s]+)/i) || txt.match(/loc[:\s]*([A-Za-z0-9\-\s]+)/i);
+                  if (locMatch) location = locMatch[1].trim();
+                }
+                return { name, type: '', inStock, location };
               });
             });
 
-            // Filter and process parts
+            // Add context to the scraped parts and write to file
             for (const part of parts) {
-              // Part filtering keywords
+
+              // --- User's robust part filtering logic ---
               const partKeywords = [
                 'volume button', 'simcard reader', 'flex cable', 'vibration', 'bottom screws', 'adhesive tape', 'glass', 'cover',
                 'display', 'screen', 'lcd', 'digitizer', 'battery', 'camera', 'charging', 'connector', 'flex', 'speaker', 'microphone',
@@ -193,33 +202,54 @@ async function scrapeBrandsAndModels() {
               const hasAccessoryKeyword = accessoryKeywords.some(keyword => normalizedName.includes(keyword));
               const hasOtherKeyword = otherKeywords.some(keyword => normalizedName.includes(keyword));
 
-              // Keep only real parts
+              // Keep it ONLY if it has a part keyword, AND it's NOT a full device (no storage spec),
+              // AND it's NOT an accessory, AND it's NOT "other stuff".
               if (hasPartKeyword && !hasStorageSpec && !hasAccessoryKeyword && !hasOtherKeyword) {
-                // Extract part type by removing brand and model from name
+                
+                // --- NEW LOGIC: Extract part type ---
                 let remainingName = part.name;
+                // Helper to escape regex special characters
                 const escapeRegExp = (string) => string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                // Create case-insensitive regex for brand and model
                 const modelRegex = new RegExp(escapeRegExp(model.name), 'gi');
                 const brandRegex = new RegExp(escapeRegExp(brand.name), 'gi');
-                remainingName = remainingName.replace(modelRegex, '').replace(brandRegex, '');
+                // Remove model first (as it's more specific)
+                remainingName = remainingName.replace(modelRegex, '');
+                // Then remove brand
+                remainingName = remainingName.replace(brandRegex, '');
+                // Clean up remaining string (removes extra spaces, dashes, etc.)
                 const partType = remainingName.replace(/[\s-]+/g, ' ').trim();
+                // --- END OF NEW LOGIC ---
 
-                // Skip if type is empty
-                if (!partType) continue;
+                // Skip if type is empty after trimming
+                if (!partType) {
+                  // Optionally log: console.warn('Skipping part with empty type:', part.name);
+                  continue;
+                }
 
                 const partObj = {
                   brand: brand.name,
                   modelCategory: category.name,
                   model: model.name,
-                  name: part.name,
-                  type: partType,
+                  name: part.name, // Keep the original full name
+                  type: partType,  // Use the new, extracted part type
                   inStock: part.inStock,
-                  imageUrl: part.imageUrl || '',
-                  scrapedAt: new Date().toISOString()
+                  location: part.location || '',
+                  scrapedAt: new Date()
                 };
 
-                allParts.push(partObj);
+                allPartsResults.push(partObj);
+                // Write each part as a line to the main file
+                fs.appendFileSync(mainFilePath, JSON.stringify(partObj) + '\n');
+                // Print to logs, showing the new type
                 console.log(`  > PART (kept): [${partObj.name}] -> TYPE: [${partObj.type}]`);
               }
+              
+              // --- BUG FIX ---
+              // The code block that was here has been removed.
+              // It was incorrectly saving *all* items (including filtered-out ones)
+              // to the results array and file, causing duplicates and bad data.
+
             }
             console.log(`Found ${parts.length} total items for ${model.name}.`);
 
@@ -230,52 +260,63 @@ async function scrapeBrandsAndModels() {
       }
     }
 
-    console.log(`Total valid parts scraped: ${allParts.length}`);
+    // 6. --- Save Parts Data & compute diffs vs previous run ---
+    console.log(`Total valid parts scraped and saved to file: ${allPartsResults.length}`);
 
-    // Smart diff: only update changed parts
-    let existingParts = [];
-    if (fs.existsSync(partsFile)) {
-      existingParts = JSON.parse(fs.readFileSync(partsFile, 'utf-8'));
-    }
+    // Read all scraped parts from the main file (new run)
+    const scrapedLines = fs.readFileSync(mainFilePath, 'utf-8').split('\n').filter(Boolean);
+    const scrapedParts = scrapedLines.map(line => JSON.parse(line));
 
-    // Create unique key for comparison
-    function partKey(part) {
-      return `${part.brand}||${part.modelCategory}||${part.model}||${part.name}||${part.type}`;
-    }
-
-    const existingMap = new Map(existingParts.map(p => [partKey(p), p]));
-    const newParts = [];
-    const updatedParts = [];
-
-    for (const part of allParts) {
-      const key = partKey(part);
-      const existing = existingMap.get(key);
-      
-      if (!existing) {
-        newParts.push(part);
-      } else if (existing.inStock !== part.inStock || existing.imageUrl !== part.imageUrl) {
-        updatedParts.push(part);
+    // Read previous parts if available
+    let prevParts = [];
+    if (fs.existsSync(prevFilePath)) {
+      try {
+        const prevLines = fs.readFileSync(prevFilePath, 'utf-8').split('\n').filter(Boolean);
+        prevParts = prevLines.map(l => JSON.parse(l));
+      } catch (e) {
+        console.warn('Failed to read previous parts file, treating as fresh run.');
+        prevParts = [];
       }
     }
 
-    console.log(`New parts: ${newParts.length}, Updated parts: ${updatedParts.length}`);
+    function partKey(part) {
+      return [part.brand, part.modelCategory, part.model, part.name, part.type && part.type.trim() !== '' ? part.type : 'Unknown'].join('||');
+    }
 
-    // Merge: keep unchanged parts, add new, update changed
-    const unchangedParts = existingParts.filter(p => {
-      const key = partKey(p);
-      return !allParts.some(newP => partKey(newP) === key);
-    });
+    const prevMap = new Map(prevParts.map(p => [partKey(p), p]));
+    const newMap = new Map(scrapedParts.map(p => [partKey(p), p]));
 
-    const finalParts = [...unchangedParts, ...newParts, ...updatedParts];
-    
-    // Save to JSON file
-    fs.writeFileSync(partsFile, JSON.stringify(finalParts, null, 2));
-    console.log(`Parts data saved to ${partsFile}`);
-    console.log(`Total parts in database: ${finalParts.length}`);
+    const added = [];
+    const removed = [];
+    const updated = [];
+
+    for (const [key, part] of newMap.entries()) {
+      if (!prevMap.has(key)) {
+        added.push(part);
+      } else {
+        const prev = prevMap.get(key);
+        // Compare relevant fields: inStock, name, type, location
+        if (prev.inStock !== part.inStock || prev.name !== part.name || prev.type !== part.type || (prev.location || '') !== (part.location || '')) {
+          updated.push({ before: prev, after: part });
+        }
+      }
+    }
+    for (const [key, part] of prevMap.entries()) {
+      if (!newMap.has(key)) removed.push(part);
+    }
+
+    const changes = { added, removed, updated };
+    try {
+      fs.writeFileSync(changesFilePath, JSON.stringify(changes, null, 2));
+      console.log(`Changes written to ${changesFilePath} (added: ${added.length}, removed: ${removed.length}, updated: ${updated.length})`);
+    } catch (e) {
+      console.warn('Failed to write changes file:', e.message);
+    }
 
   } catch (err) {
     console.error('An unexpected error occurred during scraping:', err);
   } finally {
+    // 7. --- Cleanup ---
     if (browser) {
       await browser.close();
       console.log('Browser closed.');
