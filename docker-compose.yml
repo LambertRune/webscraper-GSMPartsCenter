@@ -4,15 +4,17 @@ services:
     build: .
     container_name: gsmparts-scraper
     environment:
-      - MONGO_URI=${MONGO_URI}
       - PORT=3100
     env_file:
       - .env
+    volumes:
+      - ./data:/app/data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3100/health" ]
       interval: 30s
       timeout: 10s
       retries: 5
+    restart: unless-stopped
 
   cloudflared:
     image: cloudflare/cloudflared:latest

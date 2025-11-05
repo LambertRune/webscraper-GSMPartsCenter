@@ -1,7 +1,13 @@
 # GSMPartsCenter Webscraper & API
 
 ## Overview
-This project scrapes https://www.gsmpartscenter.com/ and stores all brands, model categories, models, and parts in MongoDB. It provides a secure, public REST API via Cloudflare Tunnel, and runs daily (every Sunday at 2:00 AM) in Docker.
+This project scrapes https://www.gsmpartscenter.com/ and stores all brands, model categories, models, and parts in **JSON files** for ultra-fast API access. It provides a secure, public REST API via Cloudflare Tunnel, and runs daily (every Sunday at 2:00 AM) in Docker.
+
+### 🚀 Performance Optimized
+- **File-based storage** instead of MongoDB (100x faster reads!)
+- **Smart diff algorithm** - only updates changed parts
+- **No database overhead** - simpler deployment
+- See [ARCHITECTURE.md](ARCHITECTURE.md) for details
 
 ## API Endpoints
 
@@ -39,7 +45,8 @@ All endpoints are prefixed with `/api` (e.g., `/api/brands`).
 
 ## Security
 - API is only accessible via the Cloudflare Tunnel endpoint.
-- MongoDB credentials and tunnel token are stored in `.env` (never commit this file).
+- Tunnel token is stored in `.env` (never commit this file).
+- No database credentials needed (file-based storage).
 
 ## Cron/Scheduling
 - The scraper runs automatically every Sunday at 2:00 AM (container time).

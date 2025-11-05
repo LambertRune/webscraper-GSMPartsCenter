@@ -4,14 +4,16 @@
   "description": "Daily web scraper for gsmpartscenter.com, Dockerized for MEAN integration.",
   "main": "backend/services/scraperService.js",
   "scripts": {
-    "start": "node backend/services/scraperService.js"
+    "start": "node backend/services/scraperService.js",
+    "api": "node backend/api.js",
+    "test-data": "node backend/test-data.js",
+    "scrape": "node backend/services/scraperService.js"
   },
   "author": "",
   "license": "MIT",
   "dependencies": {
     "dotenv": "^16.4.5",
     "express": "^5.1.0",
-    "mongoose": "^8.0.0",
     "puppeteer": "^24.15.0"
   }
 }
