@@ -1,5 +1,15 @@
 version: "3.8"
 services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared-tunnel
+    depends_on:
+      scraper:
+        condition: service_healthy
+    command: tunnel run
+    environment:
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN}
+    restart: unless-stopped
   scraper:
     build: .
     container_name: gsmparts-scraper
@@ -16,13 +26,4 @@ services:
       retries: 5
     restart: unless-stopped
 
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    container_name: cloudflared-tunnel
-    depends_on:
-      scraper:
-        condition: service_healthy
-    command: tunnel run
-    environment:
-      - TUNNEL_TOKEN=${TUNNEL_TOKEN}
-    restart: unless-stopped
+  
