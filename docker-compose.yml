@@ -2,11 +2,12 @@ version: "3.8"
 services:
   scraper:
     build: .
-    container_name: gsmparts-scraper
     environment:
-      - PORT=${PORT}
+      - PORT=${PORT:-3100}
     env_file:
       - .env
+    expose:
+      - "3100"
     volumes:
       - ./data:/app/data
     healthcheck:
@@ -15,14 +16,9 @@ services:
       timeout: 10s
       retries: 5
     restart: unless-stopped
+    networks:
+      - dokploy-network
 
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    container_name: cloudflared-tunnel
-    depends_on:
-      scraper:
-        condition: service_healthy
-    command: tunnel run
-    environment:
-      - TUNNEL_TOKEN=${TUNNEL_TOKEN}
-    restart: unless-stopped
+networks:
+  dokploy-network:
+    external: true
