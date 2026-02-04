@@ -1,17 +1,23 @@
-const express = require('express');
-const fs = require('fs');
-const path = require('path');
-require('dotenv').config();
+const express = require("express");
+const fs = require("fs");
+const path = require("path");
+require("dotenv").config();
 
 const app = express();
 const PORT = process.env.PORT || 3100;
 
 // Data file paths - aligned with scraper output location
-const dataDir = path.join(__dirname, '../data');
-const brandsFile = path.join(dataDir, 'brands.json');
-const categoriesFile = path.join(dataDir, 'categories.json');
-const modelsFile = path.join(dataDir, 'models.json');
-const partsFile = path.join(dataDir, 'parts.json');
+const dataDir = path.join(__dirname, "../data");
+
+// Ensure data directory exists
+if (!fs.existsSync(dataDir)) {
+  fs.mkdirSync(dataDir, { recursive: true });
+}
+
+const brandsFile = path.join(dataDir, "brands.json");
+const categoriesFile = path.join(dataDir, "categories.json");
+const modelsFile = path.join(dataDir, "models.json");
+const partsFile = path.join(dataDir, "parts.json");
 
 // Helper: load JSON data from file
 function loadData(filePath) {
@@ -20,7 +26,7 @@ function loadData(filePath) {
       console.warn(`File not found: ${filePath}, returning empty array`);
       return [];
     }
-    const data = fs.readFileSync(filePath, 'utf-8');
+    const data = fs.readFileSync(filePath, "utf-8");
     return JSON.parse(data);
   } catch (err) {
     console.error(`Error loading ${filePath}:`, err.message);
@@ -30,12 +36,12 @@ function loadData(filePath) {
 
 // Helper: filter data by query params
 function filterData(data, query) {
-  return data.filter(item => {
+  return data.filter((item) => {
     for (const key in query) {
       if (query[key] !== undefined) {
         // Handle boolean conversion for inStock
-        if (key === 'inStock') {
-          if (item[key] !== (query[key] === 'true')) {
+        if (key === "inStock") {
+          if (item[key] !== (query[key] === "true")) {
             return false;
           }
         } else {
@@ -52,57 +58,62 @@ function filterData(data, query) {
   });
 }
 
-
 // --- Basic GET endpoints ---
 
 // Health check endpoint
-app.get('/health', (req, res) => {
-  res.status(200).send('ok');
+app.get("/health", (req, res) => {
+  res.status(200).send("ok");
 });
 
-app.get('/api/brands', (req, res) => {
+app.get("/api/brands", (req, res) => {
   const brands = loadData(brandsFile);
   res.json(brands);
 });
 
-app.get('/api/categories', (req, res) => {
+app.get("/api/categories", (req, res) => {
   const categories = loadData(categoriesFile);
   res.json(categories);
 });
 
-app.get('/api/models', (req, res) => {
+app.get("/api/models", (req, res) => {
   const models = loadData(modelsFile);
   res.json(models);
 });
 
-app.get('/api/parts', (req, res) => {
+app.get("/api/parts", (req, res) => {
   const parts = loadData(partsFile);
   res.json(parts);
 });
 
 // --- Smart GET: filter by query params ---
-app.get('/api/search/parts', (req, res) => {
+app.get("/api/search/parts", (req, res) => {
   const { brand, modelCategory, model, type, inStock } = req.query;
   const parts = loadData(partsFile);
-  const filtered = filterData(parts, { brand, modelCategory, model, type, inStock });
+  const filtered = filterData(parts, {
+    brand,
+    modelCategory,
+    model,
+    type,
+    inStock,
+  });
   res.json(filtered);
 });
 
-app.get('/api/search/models', (req, res) => {
+app.get("/api/search/models", (req, res) => {
   const { brand, modelCategory, name } = req.query;
   const models = loadData(modelsFile);
   const filtered = filterData(models, { brand, modelCategory, name });
   res.json(filtered);
 });
 
-app.get('/api/search/categories', (req, res) => {
+app.get("/api/search/categories", (req, res) => {
   const { brand, name } = req.query;
   const categories = loadData(categoriesFile);
   const filtered = filterData(categories, { brand, name });
   res.json(filtered);
 });
 
-app.get('/api/search/brands', (req, res) => {
+app.get("/api/search/brands", (req, res) => {
   const { name } = req.query;
   const brands = loadData(brandsFile);
   const filtered = filterData(brands, { name });
