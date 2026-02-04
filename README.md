@@ -1,7 +1,7 @@
 # GSMPartsCenter Webscraper & API
 
 ## Overview
-This project scrapes https://www.gsmpartscenter.com/ and stores all brands, model categories, models, and parts in **JSON files** for ultra-fast API access. It provides a secure, public REST API via Cloudflare Tunnel, and runs daily (every Sunday at 2:00 AM) in Docker.
+This project scrapes https://www.gsmpartscenter.com/ and stores all brands, model categories, models, and parts in **JSON files** for ultra-fast API access. It provides a public REST API via Dokploy/Traefik reverse proxy, and runs daily (every Sunday at 2:00 AM) in Docker.
 
 ### 🚀 Performance Optimized
 - **File-based storage** instead of MongoDB (100x faster reads!)
@@ -44,7 +44,7 @@ All endpoints are prefixed with `/api` (e.g., `/api/brands`).
   - Example: `/api/search/models?brand=Apple&name=iPhone 13`
 
 ## Security
-- API is only accessible via the Cloudflare Tunnel endpoint.
+- API is accessible via your configured domain in Dokploy.
 - Tunnel token is stored in `.env` (never commit this file).
 - No database credentials needed (file-based storage).
 
@@ -53,6 +53,6 @@ All endpoints are prefixed with `/api` (e.g., `/api/brands`).
 
 ## Running
 - Use `docker compose up -d` to start the stack.
-- The API will be available at your Cloudflare Tunnel URL.
+- The API will be available at your configured domain.
 
 

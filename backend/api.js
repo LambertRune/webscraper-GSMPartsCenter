@@ -6,7 +6,7 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3100;
 
-// Data file paths
+// Data file paths - aligned with scraper output location
 const dataDir = path.join(__dirname, '../data');
 const brandsFile = path.join(dataDir, 'brands.json');
 const categoriesFile = path.join(dataDir, 'categories.json');

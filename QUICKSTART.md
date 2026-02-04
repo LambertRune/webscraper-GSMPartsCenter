@@ -92,7 +92,7 @@ webscraper-GSMPartsCenter/
 
 1. Run scraper to generate data: `npm run scrape`
 2. Start API server: `npm run api`
-3. Expose via Cloudflare Tunnel (already configured in .env)
+3. Deploy with Dokploy (configured for auto-routing)
 4. Set up cron job for daily scraping (see daily-job.sh)
 
 ## 💡 Tips
