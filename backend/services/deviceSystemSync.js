@@ -198,6 +198,43 @@ async function downloadDeviceSystemCsv({
       'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
     );
 
+    // Also detect CSV via network response (more reliable than download behavior)
+    const csvFromNetworkPromise = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('CSV network response not detected in time')), timeoutMs);
+
+      const onResponse = async res => {
+        try {
+          const url = res.url() || '';
+          const headers = res.headers();
+          const ct = String(headers['content-type'] || '').toLowerCase();
+          const cd = String(headers['content-disposition'] || '').toLowerCase();
+
+          const looksLikeCsv =
+            url.toLowerCase().includes('.csv') ||
+            ct.includes('text/csv') ||
+            ct.includes('application/csv') ||
+            cd.includes('.csv') ||
+            cd.includes('attachment');
+
+          if (!looksLikeCsv) return;
+
+          const buf = await res.buffer().catch(() => null);
+          if (!buf || buf.length < 50) return;
+
+          const filename = `devicesystem_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
+          const outPath = path.join(outDir, filename);
+          fs.writeFileSync(outPath, buf);
+          clearTimeout(timer);
+          page.off('response', onResponse);
+          resolve(outPath);
+        } catch {
+          // ignore
+        }
+      };
+
+      page.on('response', onResponse);
+    });
+
     // enable downloads
     const client = await page.target().createCDPSession();
     await client.send('Page.setDownloadBehavior', {
@@ -274,27 +311,55 @@ async function downloadDeviceSystemCsv({
 
     if (!downloadTriggered) {
       // Last resort: try clicking a "file-text / download" icon wrapper
-      await page.click('a[download], a[href*=".csv" i]').catch(() => {});
+      await page.click('a[download], a[href*=\".csv\" i]').catch(() => {});
+
+      // Try some common icon/button wrappers
+      await page
+        .evaluate(() => {
+          const candidates = Array.from(document.querySelectorAll('a, button, span, i'));
+          const icon = candidates.find(el => {
+            const cls = (el.getAttribute('class') || '').toLowerCase();
+            const t = (el.textContent || '').toLowerCase();
+            return cls.includes('download') || cls.includes('file-text') || t.includes('download');
+          });
+          if (icon) {
+            (icon instanceof HTMLElement) && icon.click();
+            return true;
+          }
+          return false;
+        })
+        .catch(() => {});
     }
 
-    // Wait for CSV to appear in download dir
+    // Wait for CSV via network OR filesystem download
     const start = Date.now();
     let latestCsv = null;
-    while (Date.now() - start < timeoutMs) {
+
+    while (Date.now() - start < timeoutMs && !latestCsv) {
+      // Prefer network-captured CSV if it resolved
+      const maybeNetwork = await Promise.race([
+        csvFromNetworkPromise.then(p => ({ ok: true, p })).catch(() => ({ ok: false })),
+        sleep(500).then(() => ({ ok: false }))
+      ]);
+      if (maybeNetwork.ok) {
+        latestCsv = maybeNetwork.p;
+        break;
+      }
+
       const files = fs.readdirSync(outDir).filter(f => f.toLowerCase().endsWith('.csv'));
       if (files.length > 0) {
-        // pick newest
         const full = files
-          .map(f => ({ f, p: path.join(outDir, f), m: fs.statSync(path.join(outDir, f)).mtimeMs }))
+          .map(f => ({ p: path.join(outDir, f), m: fs.statSync(path.join(outDir, f)).mtimeMs }))
           .sort((a, b) => b.m - a.m);
-        latestCsv = full[0].p;
-        // ensure file is not still being written (simple stability check)
-        const size1 = fs.statSync(latestCsv).size;
-        await sleep(500);
-        const size2 = fs.statSync(latestCsv).size;
-        if (size2 > 0 && size2 === size1) break;
+        const candidate = full[0].p;
+        const size1 = fs.statSync(candidate).size;
+        await sleep(400);
+        const size2 = fs.statSync(candidate).size;
+        if (size2 > 0 && size2 === size1) {
+          latestCsv = candidate;
+          break;
+        }
       }
-      await sleep(500);
     }
 
     if (!latestCsv) throw new Error(`CSV download not detected within ${timeoutMs}ms`);
