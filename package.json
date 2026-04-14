@@ -7,13 +7,17 @@
     "start": "node backend/services/scraperService.js",
     "api": "node backend/api.js",
     "test-data": "node backend/test-data.js",
-    "scrape": "node backend/services/scraperService.js"
+    "scrape": "node backend/services/scraperService.js",
+    "sync:devicesystem": "node backend/services/deviceSystemSync.js"
   },
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "csv-parse": "^6.1.0",
     "dotenv": "^16.4.5",
     "express": "^5.1.0",
-    "puppeteer": "^24.15.0"
+    "puppeteer": "^24.15.0",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.1"
   }
 }

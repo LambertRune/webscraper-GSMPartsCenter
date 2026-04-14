@@ -66,3 +66,9 @@ All endpoints are prefixed with `/api` (e.g., `/api/brands`).
 
 - Use `docker compose up -d` to start the stack.
 - The API will be available at your configured domain.
+
+## MobileSentrix DeviceSystem Sync (separate)
+
+MobileSentrix sync job lives in this repo, but is separate concern from GSMPartsCenter scraper/API.
+
+Docs: see `MOBILESENTRIX_SYNC.md`.
