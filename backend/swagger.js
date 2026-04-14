@@ -22,6 +22,7 @@ function buildOpenApiSpec({ port } = {}) {
         { name: 'Categories', description: 'Model categories data' },
         { name: 'Models', description: 'Models data' },
         { name: 'Parts', description: 'Parts data' },
+        { name: 'MobileSentrix', description: 'MobileSentrix DeviceSystem feed' },
         { name: 'Search', description: 'Filtered queries' }
       ],
       components: {
@@ -66,6 +67,32 @@ function buildOpenApiSpec({ port } = {}) {
               scrapedAt: { type: 'string', format: 'date-time' }
             },
             required: ['brand', 'modelCategory', 'model', 'name', 'type', 'inStock', 'scrapedAt']
+          }
+          ,
+          MobileSentrixDeviceSystemProduct: {
+            type: 'object',
+            properties: {
+              sku: { type: 'string' },
+              title: { type: 'string' },
+              make: { type: 'string' },
+              model: { type: 'string' },
+              size: { type: 'string' },
+              color: { type: 'string' },
+              condition: { type: 'string' },
+              carrier: { type: 'string' },
+              availableQty: { type: 'number' },
+              inStock: { type: 'boolean' },
+              pricing: {
+                type: 'object',
+                properties: {
+                  costPriceExVat: { type: 'number', nullable: true },
+                  retailPriceIncVat: { type: 'number', nullable: true },
+                  currency: { type: 'string' }
+                }
+              },
+              source: { type: 'string' }
+            },
+            required: ['sku', 'title', 'availableQty', 'inStock', 'pricing', 'source']
           }
         }
       },
@@ -140,6 +167,25 @@ function buildOpenApiSpec({ port } = {}) {
                 content: {
                   'application/json': {
                     schema: { type: 'array', items: { $ref: '#/components/schemas/Part' } }
+                  }
+                }
+              }
+            }
+          }
+        },
+        '/api/mobilesentrix/devicesystem': {
+          get: {
+            tags: ['MobileSentrix'],
+            summary: 'List MobileSentrix DeviceSystem products (normalized)',
+            responses: {
+              200: {
+                description: 'Products',
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'array',
+                      items: { $ref: '#/components/schemas/MobileSentrixDeviceSystemProduct' }
+                    }
                   }
                 }
               }

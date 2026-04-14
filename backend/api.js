@@ -20,6 +20,7 @@ const brandsFile = path.join(dataDir, 'brands.json');
 const categoriesFile = path.join(dataDir, 'categories.json');
 const modelsFile = path.join(dataDir, 'models.json');
 const partsFile = path.join(dataDir, 'parts.json');
+const mobilesentrixDeviceSystemFile = path.join(dataDir, 'devicesystem-products.json');
 
 // Helper: load JSON data from file
 function loadData(filePath) {
@@ -88,6 +89,11 @@ app.get('/api/models', (req, res) => {
 app.get('/api/parts', (req, res) => {
   const parts = loadData(partsFile);
   res.json(parts);
+});
+
+app.get('/api/mobilesentrix/devicesystem', (req, res) => {
+  const products = loadData(mobilesentrixDeviceSystemFile);
+  res.json(products);
 });
 
 // --- Smart GET: filter by query params ---

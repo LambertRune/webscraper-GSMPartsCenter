@@ -67,16 +67,20 @@ async function scrapeBrandsAndModels() {
 
     // Wait for navigation menu content to load (AJAX-loaded)
     try {
-      // First wait for container
-      await page.waitForSelector('ul.groupmenu.by-parts', { timeout: 15000 });
+      // First wait for container (site sometimes slow / geo-dependent)
+      await page.waitForSelector('ul.groupmenu.by-parts', { timeout: 60000 });
       console.log('Navigation menu container found, waiting for content...');
-      
-      // Wait for actual menu items to load (they are loaded via AJAX)
-      await page.waitForSelector('ul.groupmenu.by-parts li.level0 a.menu-link', { timeout: 30000 });
+
+      // Wait until at least one brand item appears.
+      // We use waitForFunction because menu can be present but still empty while AJAX fills it.
+      await page.waitForFunction(
+        () => document.querySelectorAll('ul.groupmenu.by-parts li.level0 a.menu-link').length > 0,
+        { timeout: 60000, polling: 500 }
+      );
       console.log('Navigation menu content loaded.');
-      
+
       // Extra wait to ensure all AJAX content is fully populated
-      await new Promise(resolve => setTimeout(resolve, 5000));
+      await new Promise(resolve => setTimeout(resolve, 3000));
     } catch (e) {
       console.error('Navigation menu not fully loaded after timeout. Saving debug HTML...');
       const fullHtml = await page.content();
