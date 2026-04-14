@@ -290,6 +290,40 @@ async function downloadDeviceSystemCsv({
       await page.goto(url, { waitUntil: 'networkidle2', timeout: timeoutMs });
     }
 
+    // Direct-link attempt: find any likely export/download URL and open it.
+    // This often triggers the CSV response even when buttons are hard to click.
+    const candidateHref = await page
+      .evaluate(() => {
+        const anchors = Array.from(document.querySelectorAll('a[href]'));
+        const scored = anchors
+          .map(a => {
+            const href = String(a.getAttribute('href') || '');
+            const text = String(a.textContent || '');
+            const hay = (href + ' ' + text).toLowerCase();
+            const score =
+              (hay.includes('devicesystem') ? 5 : 0) +
+              (hay.includes('export') ? 4 : 0) +
+              (hay.includes('download') ? 3 : 0) +
+              (hay.includes('.csv') ? 10 : 0) +
+              (hay.includes('csv') ? 6 : 0);
+            return { href, score };
+          })
+          .filter(x => x.href && x.score > 0)
+          .sort((a, b) => b.score - a.score);
+        return scored[0]?.href || null;
+      })
+      .catch(() => null);
+
+    if (candidateHref) {
+      try {
+        const absolute = new URL(candidateHref, page.url()).toString();
+        console.log(`Found candidate export link: ${absolute}`);
+        await page.goto(absolute, { waitUntil: 'networkidle2', timeout: timeoutMs }).catch(() => {});
+      } catch {
+        // ignore
+      }
+    }
+
     // Find any link/button that triggers CSV download (best effort heuristic)
     console.log('Searching for CSV download action...');
     const downloadTriggered = await page.evaluate(() => {
@@ -333,6 +367,28 @@ async function downloadDeviceSystemCsv({
           return false;
         })
         .catch(() => {});
+
+      // Try common export/download attributes
+      await page
+        .evaluate(() => {
+          const sels = [
+            '[aria-label*="download" i]',
+            '[aria-label*="export" i]',
+            '[title*="download" i]',
+            '[title*="export" i]',
+            '[data-action*="download" i]',
+            '[data-action*="export" i]'
+          ];
+          for (const sel of sels) {
+            const el = document.querySelector(sel);
+            if (el) {
+              (el instanceof HTMLElement) && el.click();
+              return true;
+            }
+          }
+          return false;
+        })
+        .catch(() => {});
     }
 
     // Wait for CSV via network OR filesystem download
@@ -366,7 +422,27 @@ async function downloadDeviceSystemCsv({
       }
     }
 
-    if (!latestCsv) throw new Error(`CSV download not detected within ${timeoutMs}ms`);
+    if (!latestCsv) {
+      // Debug artifacts to help diagnose selector/flow differences in production
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const debugHtmlPath = path.join(outDir, `mobilesentrix_devicesystem_debug_${stamp}.html`);
+      const debugPngPath = path.join(outDir, `mobilesentrix_devicesystem_debug_${stamp}.png`);
+
+      try {
+        const html = await page.content();
+        fs.writeFileSync(debugHtmlPath, html);
+      } catch {}
+
+      try {
+        await page.screenshot({ path: debugPngPath, fullPage: true });
+      } catch {}
+
+      throw new Error(
+        `CSV download not detected within ${timeoutMs}ms (debug saved: ${path.basename(debugHtmlPath)}, ${path.basename(
+          debugPngPath
+        )})`
+      );
+    }
     console.log(`Downloaded CSV: ${latestCsv}`);
     return latestCsv;
   } finally {
