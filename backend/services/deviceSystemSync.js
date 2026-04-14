@@ -198,9 +198,13 @@ async function downloadDeviceSystemCsv({
       'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
     );
 
-    // Also detect CSV via network response (more reliable than download behavior)
-    const csvFromNetworkPromise = new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('CSV network response not detected in time')), timeoutMs);
+    // Also detect CSV via network response (more reliable than download behavior).
+    // IMPORTANT: never throw on timeout; fallback to filesystem download detection.
+    const csvFromNetworkPromise = new Promise(resolve => {
+      const timer = setTimeout(() => {
+        page.off('response', onResponse);
+        resolve(null);
+      }, timeoutMs);
 
       const onResponse = async res => {
         try {

@@ -21,10 +21,12 @@ MS_CRON_SCHEDULE="${MS_CRON_SCHEDULE:-30 21 * * *}"
 ENABLE_GSM_CRON="${ENABLE_GSM_CRON:-true}"
 ENABLE_MOBILESENTRIX_CRON="${ENABLE_MOBILESENTRIX_CRON:-false}"
 MOBILESENTRIX_RUN_ON_STARTUP="${MOBILESENTRIX_RUN_ON_STARTUP:-true}"
+GSM_RUN_ON_STARTUP="${GSM_RUN_ON_STARTUP:-false}"
 
 echo "🗓️  Cron config:"
 echo "   - GSMPartsCenter enabled=${ENABLE_GSM_CRON} schedule='${GSM_CRON_SCHEDULE}'"
 echo "   - MobileSentrix enabled=${ENABLE_MOBILESENTRIX_CRON} schedule='${MS_CRON_SCHEDULE}' run_on_startup=${MOBILESENTRIX_RUN_ON_STARTUP}"
+echo "   - GSMPartsCenter run_on_startup=${GSM_RUN_ON_STARTUP}"
 
 if [ "$ENABLE_GSM_CRON" = "true" ]; then
   cat > /etc/cron.d/gsm-scrape <<EOF
@@ -47,6 +49,12 @@ fi
 # Start cron daemon
 echo "⏰ Starting cron daemon..."
 cron
+
+# Optional: run GSMPartsCenter scrape once on container start (default off)
+if [ "$GSM_RUN_ON_STARTUP" = "true" ]; then
+  echo "▶️  Running GSMPartsCenter scrape on startup..."
+  (cd /app && node backend/services/scraperService.js >> "$CRON_LOG" 2>&1) &
+fi
 
 # Optional: run MobileSentrix sync once on container start to avoid empty API on fresh deploy.
 if [ "$ENABLE_MOBILESENTRIX_CRON" = "true" ] && [ "$MOBILESENTRIX_RUN_ON_STARTUP" = "true" ]; then
