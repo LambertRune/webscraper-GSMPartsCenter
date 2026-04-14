@@ -200,6 +200,19 @@ async function downloadDeviceSystemCsv({
 
     // Also detect CSV via network response (more reliable than download behavior).
     // IMPORTANT: never throw on timeout; fallback to filesystem download detection.
+    const recentRequestUrls = [];
+    page.on('request', req => {
+      try {
+        const u = req.url();
+        if (!u) return;
+        const lu = u.toLowerCase();
+        if (lu.includes('devicesystem') || lu.includes('export') || lu.includes('download') || lu.includes('.csv')) {
+          recentRequestUrls.push(u);
+          if (recentRequestUrls.length > 200) recentRequestUrls.shift();
+        }
+      } catch {}
+    });
+
     const csvFromNetworkPromise = new Promise(resolve => {
       const timer = setTimeout(() => {
         page.off('response', onResponse);
@@ -368,6 +381,22 @@ async function downloadDeviceSystemCsv({
         })
         .catch(() => {});
 
+      // Try specific icon class seen on site dumps
+      await page
+        .evaluate(() => {
+          const el =
+            document.querySelector('.download-black') ||
+            document.querySelector('[class*="download-black" i]') ||
+            document.querySelector('[class*="file-text" i]') ||
+            document.querySelector('[class*="download" i]');
+          if (el) {
+            (el instanceof HTMLElement) && el.click();
+            return true;
+          }
+          return false;
+        })
+        .catch(() => {});
+
       // Try common export/download attributes
       await page
         .evaluate(() => {
@@ -427,6 +456,7 @@ async function downloadDeviceSystemCsv({
       const stamp = new Date().toISOString().replace(/[:.]/g, '-');
       const debugHtmlPath = path.join(outDir, `mobilesentrix_devicesystem_debug_${stamp}.html`);
       const debugPngPath = path.join(outDir, `mobilesentrix_devicesystem_debug_${stamp}.png`);
+      const debugMetaPath = path.join(outDir, `mobilesentrix_devicesystem_debug_${stamp}.txt`);
 
       try {
         const html = await page.content();
@@ -437,10 +467,43 @@ async function downloadDeviceSystemCsv({
         await page.screenshot({ path: debugPngPath, fullPage: true });
       } catch {}
 
+      try {
+        const topAnchors = await page.evaluate(() => {
+          const anchors = Array.from(document.querySelectorAll('a[href]'));
+          return anchors
+            .map(a => {
+              const href = String(a.getAttribute('href') || '');
+              const text = String(a.textContent || '').trim().slice(0, 120);
+              const hay = (href + ' ' + text).toLowerCase();
+              const score =
+                (hay.includes('devicesystem') ? 5 : 0) +
+                (hay.includes('export') ? 4 : 0) +
+                (hay.includes('download') ? 3 : 0) +
+                (hay.includes('.csv') ? 10 : 0) +
+                (hay.includes('csv') ? 6 : 0);
+              return { href, text, score };
+            })
+            .filter(x => x.href && x.score > 0)
+            .sort((a, b) => b.score - a.score)
+            .slice(0, 20);
+        });
+
+        const lines = [];
+        lines.push(`page_url=${page.url()}`);
+        lines.push(`candidateHref=${candidateHref || ''}`);
+        lines.push('');
+        lines.push('top_anchor_candidates=');
+        for (const a of topAnchors) lines.push(`${a.score}\t${a.href}\t${a.text}`);
+        lines.push('');
+        lines.push('recent_request_urls=');
+        for (const u of recentRequestUrls.slice(-50)) lines.push(u);
+        fs.writeFileSync(debugMetaPath, lines.join('\n'));
+      } catch {}
+
       throw new Error(
         `CSV download not detected within ${timeoutMs}ms (debug saved: ${path.basename(debugHtmlPath)}, ${path.basename(
           debugPngPath
-        )})`
+        )}, ${path.basename(debugMetaPath)})`
       );
     }
     console.log(`Downloaded CSV: ${latestCsv}`);
