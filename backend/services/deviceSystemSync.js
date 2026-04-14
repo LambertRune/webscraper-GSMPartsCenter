@@ -291,15 +291,67 @@ async function downloadDeviceSystemCsv({
         );
       }
       console.log('Login form detected; attempting sign-in...');
-      await page.type('input[type="email"], input[name*="email" i], input#email', user, { delay: 20 });
-      await page.type('input[type="password"], input[name*="pass" i], input#pass', pass, { delay: 20 });
+      const emailSel = 'input[type="email"], input[name*="email" i], input#email';
+      const passSel = 'input[type="password"], input[name*="pass" i], input#pass';
 
-      // Submit
-      await Promise.allSettled([
-        page.click('button[type="submit"], button[name="send"], button.login, #send2'),
-        page.keyboard.press('Enter')
-      ]);
-      await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: timeoutMs }).catch(() => {});
+      await page.click(emailSel).catch(() => {});
+      await page.keyboard.down('Control').catch(() => {});
+      await page.keyboard.press('A').catch(() => {});
+      await page.keyboard.up('Control').catch(() => {});
+      await page.type(emailSel, user, { delay: 20 });
+
+      await page.click(passSel).catch(() => {});
+      await page.keyboard.down('Control').catch(() => {});
+      await page.keyboard.press('A').catch(() => {});
+      await page.keyboard.up('Control').catch(() => {});
+      await page.type(passSel, pass, { delay: 20 });
+
+      // Submit (Magento themes vary a lot). Try: click common selectors, click by text, form submit, then Enter.
+      const navigationPromise = page
+        .waitForNavigation({ waitUntil: 'networkidle2', timeout: timeoutMs })
+        .catch(() => null);
+
+      await page
+        .click(
+          [
+            'button[type="submit"]',
+            'button[name="send"]',
+            'button.login',
+            '#send2',
+            'button.action.login.primary',
+            'button.action.login',
+            'button.primary'
+          ].join(', ')
+        )
+        .catch(() => {});
+
+      await page
+        .evaluate(() => {
+          const buttons = Array.from(document.querySelectorAll('button, input[type="submit"]'));
+          const b = buttons.find(el => /sign in|login|log in|aanmelden|inloggen/i.test(el.textContent || el.value || ''));
+          if (b) {
+            (b instanceof HTMLElement) && b.click();
+            return true;
+          }
+          const form = document.querySelector('form');
+          if (form && typeof form.submit === 'function') {
+            form.submit();
+            return true;
+          }
+          return false;
+        })
+        .catch(() => {});
+
+      await page.keyboard.press('Enter').catch(() => {});
+      await navigationPromise;
+
+      // Verify we are not stuck on login page
+      const currentUrl = page.url();
+      if (currentUrl.includes('/customer/account/login')) {
+        throw new Error(`Login did not complete (still on ${currentUrl}). Check credentials/captcha.`);
+      }
+
+      // Go to devicesystem page after login
       await page.goto(url, { waitUntil: 'networkidle2', timeout: timeoutMs });
     }
 
