@@ -348,7 +348,23 @@ async function downloadDeviceSystemCsv({
       // Verify we are not stuck on login page
       const currentUrl = page.url();
       if (currentUrl.includes('/customer/account/login')) {
-        throw new Error(`Login did not complete (still on ${currentUrl}). Check credentials/captcha.`);
+        // Dump debug artifacts for login blockers (captcha/extra step)
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const debugHtmlPath = path.join(outDir, `mobilesentrix_login_debug_${stamp}.html`);
+        const debugPngPath = path.join(outDir, `mobilesentrix_login_debug_${stamp}.png`);
+        try {
+          const html = await page.content();
+          fs.writeFileSync(debugHtmlPath, html);
+        } catch {}
+        try {
+          await page.screenshot({ path: debugPngPath, fullPage: true });
+        } catch {}
+
+        throw new Error(
+          `Login did not complete (still on ${currentUrl}). Check credentials/captcha. (debug saved: ${path.basename(
+            debugHtmlPath
+          )}, ${path.basename(debugPngPath)})`
+        );
       }
 
       // Go to devicesystem page after login
