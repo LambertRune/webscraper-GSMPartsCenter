@@ -12,8 +12,8 @@ function buildOpenApiSpec({ port } = {}) {
       },
       servers: [
         {
-          url: `http://localhost:${port || 3100}`,
-          description: 'Local development'
+          url: '/',
+          description: 'Current host'
         }
       ],
       tags: [

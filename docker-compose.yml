@@ -4,6 +4,10 @@ services:
     build: .
     environment:
       - PORT=${PORT:-3100}
+      - ENABLE_GSM_CRON=${ENABLE_GSM_CRON:-true}
+      - GSM_CRON_SCHEDULE=${GSM_CRON_SCHEDULE:-0 22 * * 0}
+      - ENABLE_MOBILESENTRIX_CRON=${ENABLE_MOBILESENTRIX_CRON:-false}
+      - MS_CRON_SCHEDULE=${MS_CRON_SCHEDULE:-30 21 * * *}
     env_file:
       - .env
     expose:

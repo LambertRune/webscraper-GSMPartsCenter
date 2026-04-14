@@ -35,11 +35,7 @@ RUN npm install
 RUN npx puppeteer browsers install chrome
 RUN chmod +x /app/daily-job.sh
 RUN chmod +x /app/entrypoint.sh
-
-# Add cron job
-RUN echo "0 2 * * 0 /app/daily-job.sh >> /var/log/cron.log 2>&1" > /etc/cron.d/daily-job
-# RUN chmod 0644 /etc/cron.d/daily-job
-# RUN crontab /etc/cron.d/daily-job
+RUN chmod +x /app/mobilesentrix-job.sh
 
 # Create log file
 RUN touch /var/log/cron.log
